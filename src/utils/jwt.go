@@ -10,7 +10,6 @@ import (
 
 var SecretKey = []byte(configs.JWTSecretKey())
 
-
 type JWTClaims struct {
 	Username string `json:"username"`
 	jwt.RegisteredClaims

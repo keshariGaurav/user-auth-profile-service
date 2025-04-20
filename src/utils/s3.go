@@ -2,7 +2,7 @@ package utils
 
 import (
 	"user-auth-profile-service/src/configs"
-	
+
 	"bytes"
 	"context"
 	"fmt"
@@ -35,9 +35,9 @@ func UploadToS3(client *s3.Client, bucketName string, file io.Reader, originalFi
 	}
 
 	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(key),
-		Body:   bytes.NewReader(buf.Bytes()),
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(buf.Bytes()),
 		ContentType: aws.String("application/pdf"),
 	})
 	if err != nil {
