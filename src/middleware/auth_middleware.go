@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"strings"
+
 	"github.com/gofiber/fiber/v2"
 
 	"user-auth-profile-service/src/utils"

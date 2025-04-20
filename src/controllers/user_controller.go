@@ -1,13 +1,14 @@
 package controllers
 
 import (
+	"context"
+	"log"
+	"net/http"
+	"time"
 	"user-auth-profile-service/src/configs"
 	"user-auth-profile-service/src/models"
 	"user-auth-profile-service/src/responses"
 	"user-auth-profile-service/src/utils"
-	"context"
-	"net/http"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -35,15 +36,18 @@ func CreateUser(c *fiber.Ctx) error {
 	username := c.Locals("username").(string)
 
 	if err != nil {
-	return utils.RespondWithError(c, fiber.StatusBadRequest, "Resume file is required", err)
+		return utils.RespondWithError(c, fiber.StatusBadRequest, "Resume file is required", err)
 	}
-	
+
 	file, err := fileHeader.Open()
 	if err != nil {
 		return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to open resume file", err)
 	}
-	defer file.Close()
-
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("⚠️ Failed to close file: %v", err)
+		}
+	}()
 
 	var user models.User
 	err = userCollection.FindOne(ctx, bson.M{
@@ -55,7 +59,6 @@ func CreateUser(c *fiber.Ctx) error {
 		return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to save user - user already exists", err)
 	}
 
-
 	s3Client, bucketName := utils.InitS3()
 	resumeURL, err := utils.UploadToS3(s3Client, bucketName, file, fileHeader.Filename)
 	if err != nil {
@@ -65,7 +68,7 @@ func CreateUser(c *fiber.Ctx) error {
 	newUser := models.User{
 		Id:       primitive.NewObjectID(),
 		Name:     name,
-		Email: 		email,
+		Email:    email,
 		Location: location,
 		Title:    title,
 		Address:  address,
@@ -91,7 +94,6 @@ func CreateUser(c *fiber.Ctx) error {
 		Data:    &fiber.Map{"data": result},
 	})
 }
-
 
 func GetAUser(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -140,7 +142,11 @@ func EditAUser(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.RespondWithError(c, fiber.StatusBadRequest, "Failed to open resume file.", err)
 		}
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				log.Printf("⚠️ Failed to close file: %v", err)
+			}
+		}()
 
 		// Upload to S3
 		s3Client, bucketName := utils.InitS3()
@@ -168,7 +174,7 @@ func EditAUser(c *fiber.Ctx) error {
 	// Perform update in MongoDB
 	result, err := userCollection.UpdateOne(ctx, bson.M{"id": objId}, bson.M{"$set": update})
 	if err != nil {
-			return utils.RespondWithError(c, fiber.StatusInternalServerError, "Failed to update user.", err)
+		return utils.RespondWithError(c, fiber.StatusInternalServerError, "Failed to update user.", err)
 	}
 
 	// Fetch updated user
@@ -187,8 +193,6 @@ func EditAUser(c *fiber.Ctx) error {
 	})
 }
 
-
-
 func DeleteAUser(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	userId := c.Params("userId")
@@ -198,7 +202,7 @@ func DeleteAUser(c *fiber.Ctx) error {
 
 	result, err := userCollection.DeleteOne(ctx, bson.M{"id": objId})
 	if err != nil {
-			return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to delete user.", err)
+		return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to delete user.", err)
 	}
 
 	if result.DeletedCount < 1 {
@@ -220,11 +224,15 @@ func GetAllUsers(c *fiber.Ctx) error {
 	results, err := userCollection.Find(ctx, bson.M{})
 
 	if err != nil {
-			return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to Fetch users.", err)
+		return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to Fetch users.", err)
 	}
 
 	//reading from the db in an optimal way
-	defer results.Close(ctx)
+	defer func() {
+		if err := results.Close(ctx); err != nil {
+			log.Printf("⚠️ Failed to close Mongo cursor: %v", err)
+		}
+	}()
 	for results.Next(ctx) {
 		var singleUser models.User
 		if err = results.Decode(&singleUser); err != nil {

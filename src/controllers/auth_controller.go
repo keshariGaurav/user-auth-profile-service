@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"user-auth-profile-service/src/utils"
-	"user-auth-profile-service/src/models"
 	"user-auth-profile-service/src/configs"
+	"user-auth-profile-service/src/models"
+	"user-auth-profile-service/src/utils"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -17,7 +17,6 @@ import (
 )
 
 var userCol *mongo.Collection = configs.GetCollection(configs.DB, "auth")
-
 
 func Register(c *fiber.Ctx) error {
 	var user models.Auth
@@ -64,29 +63,29 @@ func Login(c *fiber.Ctx) error {
 
 func UpdatePassword(c *fiber.Ctx) error {
 	type Request struct {
-	Username        string `json:"username" validate:"required"`
-	CurrentPassword string `json:"currentPassword" validate:"required"`
-	NewPassword     string `json:"newPassword" validate:"required"`
-}
-var validate = validator.New()
+		Username        string `json:"username" validate:"required"`
+		CurrentPassword string `json:"currentPassword" validate:"required"`
+		NewPassword     string `json:"newPassword" validate:"required"`
+	}
+	var validate = validator.New()
 
 	var req Request
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 	}
 	if err := validate.Struct(req); err != nil {
-	var ve validator.ValidationErrors
-	if errors.As(err, &ve) {
-		errorMessages := make(map[string]string)
-		for _, e := range ve {
-			errorMessages[e.Field()] = fmt.Sprintf("failed on '%s' tag", e.Tag())
+		var ve validator.ValidationErrors
+		if errors.As(err, &ve) {
+			errorMessages := make(map[string]string)
+			for _, e := range ve {
+				errorMessages[e.Field()] = fmt.Sprintf("failed on '%s' tag", e.Tag())
+			}
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"validationErrors": errorMessages})
 		}
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"validationErrors": errorMessages})
-	}
 
-	// fallback in case it's not a ValidationError
-	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-}
+		// fallback in case it's not a ValidationError
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	var user models.Auth
 	err := userCol.FindOne(context.TODO(), bson.M{"username": req.Username}).Decode(&user)
@@ -114,5 +113,3 @@ var validate = validator.New()
 
 	return c.JSON(fiber.Map{"message": "Password updated successfully"})
 }
-
-
