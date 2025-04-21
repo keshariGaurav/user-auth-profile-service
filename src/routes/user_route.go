@@ -13,4 +13,5 @@ func UserRoute(app *fiber.App) {
 	app.Put("/user/:userId", middleware.Protected(), controllers.EditAUser)
 	app.Delete("/user/:userId", middleware.Protected(), controllers.DeleteAUser)
 	app.Get("/users", controllers.GetAllUsers)
+	// app.Delete("/users", controllers.DeleteAllUsers)
 }
