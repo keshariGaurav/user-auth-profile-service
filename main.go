@@ -28,9 +28,9 @@ func main() {
 	}
 	app := fiber.New()
 	configs.ConnectDB()
-	// if err := configs.SetupAllIndexes(); err != nil {
-	// log.Fatal(err)
-	// }
+	if err := configs.SetupAllIndexes(); err != nil {
+	log.Fatal(err)
+	}
 	routes.UserRoute(app)
 	routes.AuthRoute(app)
 

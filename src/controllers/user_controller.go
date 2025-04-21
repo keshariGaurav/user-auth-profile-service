@@ -216,6 +216,30 @@ func DeleteAUser(c *fiber.Ctx) error {
 	)
 }
 
+func DeleteAllUsers(c *fiber.Ctx) error {
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    // Perform delete operation
+    result, err := userCollection.DeleteMany(ctx, bson.M{})
+    if err != nil {
+        return utils.RespondWithError(c, http.StatusInternalServerError, "Failed to delete users.", err)
+    }
+
+    // Check if any users were deleted
+    if result.DeletedCount < 1 {
+        return c.Status(http.StatusNotFound).JSON(
+            responses.UserResponse{Status: http.StatusNotFound, Message: "error", Data: &fiber.Map{"data": "No users found to delete!"}},
+        )
+    }
+
+    // Return success message
+    return c.Status(http.StatusOK).JSON(
+        responses.UserResponse{Status: http.StatusOK, Message: "success", Data: &fiber.Map{"data": "All users successfully deleted!"}},
+    )
+}
+
+
 func GetAllUsers(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	var users []models.User
