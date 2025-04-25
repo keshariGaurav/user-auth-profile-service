@@ -3,6 +3,8 @@ package utils
 import (
 	"errors"
 	"time"
+	"crypto/rand"
+	"encoding/hex"
 	"user-auth-profile-service/src/configs"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -39,3 +41,10 @@ func ParseJWT(tokenStr string) (jwt.MapClaims, error) {
 
 	return claims, nil
 }
+
+func GenerateResetToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
