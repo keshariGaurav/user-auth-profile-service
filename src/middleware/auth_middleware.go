@@ -2,30 +2,42 @@ package middleware
 
 import (
 	"strings"
-
-	"github.com/gofiber/fiber/v2"
+	"time"
 
 	"user-auth-profile-service/src/utils"
+
+	"github.com/gofiber/fiber/v2"
 )
 
-func Protected() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Missing token"})
-		}
-
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
-		}
-
-		tokenStr := parts[1]
-		claims, err := utils.ParseJWT(tokenStr)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid or expired token"})
-		}
-		c.Locals("username", claims["username"])
-		return c.Next()
+func AuthMiddleware(c *fiber.Ctx) error {
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return c.Status(401).JSON(fiber.Map{"error": "No authorization header"})
 	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenString == authHeader {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+
+	claims, err := utils.ParseJWT(tokenString)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid token"})
+	}
+
+	// Check token expiration
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().Unix() > int64(exp) {
+			return c.Status(401).JSON(fiber.Map{"error": "Token has expired"})
+		}
+	}
+
+	// Store email in context for use in protected routes
+	if email, ok := claims["email"].(string); ok {
+		c.Locals("email", email)
+	} else {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+
+	return c.Next()
 }

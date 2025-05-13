@@ -8,10 +8,10 @@ import (
 )
 
 func UserRoute(app *fiber.App) {
-	app.Post("/user", middleware.Protected(), controllers.CreateUser)
-	app.Get("/user/:userId", controllers.GetAUser)
-	app.Put("/user/:userId", middleware.Protected(), controllers.EditAUser)
-	app.Delete("/user/:userId", middleware.Protected(), controllers.DeleteAUser)
-	app.Get("/users", controllers.GetAllUsers)
-	// app.Delete("/users", controllers.DeleteAllUsers)
+	// Protected routes that require authentication
+	app.Post("/user", middleware.AuthMiddleware, controllers.CreateUser)
+	app.Get("/user/:userId", middleware.AuthMiddleware, controllers.GetAUser)
+	app.Put("/user/:userId", middleware.AuthMiddleware, controllers.EditAUser)
+	app.Delete("/user/:userId", middleware.AuthMiddleware, controllers.DeleteAUser)
+	app.Get("/users", middleware.AuthMiddleware, controllers.GetAllUsers)
 }

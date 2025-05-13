@@ -11,5 +11,5 @@ func AuthRoute(app *fiber.App) {
 	app.Post("auth/login", controllers.Login)
 	app.Post("auth/update-password", controllers.UpdatePassword)
 	app.Post("auth/forgot-password", controllers.ForgotPassword)
-
+	app.Post("auth/verify-otp", controllers.VerifyOTP)
 }

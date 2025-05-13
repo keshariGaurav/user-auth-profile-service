@@ -1,11 +1,13 @@
 package utils
 
 import (
-	"errors"
-	"time"
-	"os"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"os"
+	"time"
+
+	"user-auth-profile-service/src/configs"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -18,17 +20,26 @@ func JWTSecretKey() string {
 var SecretKey = []byte(JWTSecretKey())
 
 type JWTClaims struct {
-	Username string `json:"username"`
+	Email string `json:"email"`
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(username string) (string, error) {
+func GenerateJWT(email string) (string, error) {
+	config := configs.LoadEnv()
+	
 	claims := jwt.MapClaims{
-		"username": username,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+		"email":  email,
+		"exp":   time.Now().Add(time.Hour * 24).Unix(),
+		"iss":   config.JWTIssuer,
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(SecretKey)
+	tokenString, err := token.SignedString([]byte(config.JWTSecret))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
 
 func ParseJWT(tokenStr string) (jwt.MapClaims, error) {

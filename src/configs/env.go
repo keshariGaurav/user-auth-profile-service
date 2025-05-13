@@ -18,8 +18,8 @@ type Config struct {
 	AWSBucketName string
 
 	// JWT Configuration
-	JWTSecretKey      string
-	JWTExpirationTime string
+	JWTSecret      string
+	JWTIssuer      string
 }
 
 func LoadEnv() Config {
@@ -40,7 +40,7 @@ func LoadEnv() Config {
 		AWSBucketName: os.Getenv("AWS_S3_BUCKET"),
 
 		// JWT
-		JWTSecretKey:      os.Getenv("JWT_SECRET_KEY"),
-		JWTExpirationTime: os.Getenv("JWT_EXPIRATION_TIME"),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		JWTIssuer:      os.Getenv("JWT_ISSUER"),
 	}
 }

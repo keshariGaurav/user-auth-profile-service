@@ -4,42 +4,164 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"user-auth-profile-service/src/configs"
 	"user-auth-profile-service/src/models"
+	"user-auth-profile-service/src/rabbitmq"
 	"user-auth-profile-service/src/structure"
 	"user-auth-profile-service/src/utils"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
 
-var authCol *mongo.Collection = configs.GetCollection(configs.DB, "auth")
+var (
+	authCol  = configs.GetCollection(configs.DB, "auth")
+	producer *rabbitmq.Producer
+)
+
+// Using a separate validate variable for auth controller
+var authValidate = validator.New()
+
+func init() {
+	config := configs.LoadEnv()
+	conn, err := amqp.Dial(config.AmqpURL)
+	if (err != nil) {
+		log.Printf("Failed to connect to RabbitMQ: %v", err)
+		return
+	}
+
+	ch, err := conn.Channel()
+	if (err != nil) {
+		log.Printf("Failed to open channel: %v", err)
+		return
+	}
+
+	producer, err = rabbitmq.NewProducer(ch, config.QueueName, true)
+	if (err != nil) {
+		log.Printf("Failed to create producer: %v", err)
+		return
+	}
+}
 
 func Register(c *fiber.Ctx) error {
-	var user models.Auth
-	if err := c.BodyParser(&user); err != nil {
+	var req structure.RegisterRequest
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 	}
 
-	// Check if user already exists
-	count, _ := authCol.CountDocuments(context.TODO(), bson.M{"username": user.Username})
-	if count > 0 {
-		return c.Status(409).JSON(fiber.Map{"error": "User already exists"})
+	// Validate request
+	if err := authValidate.Struct(req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte(user.Password), 14)
-	user.Password = string(hash)
-	_, err := authCol.InsertOne(context.TODO(), user)
+	// Check if user already exists
+	count, _ := authCol.CountDocuments(context.TODO(), bson.M{"email": req.Email})
+	if count > 0 {
+		return c.Status(409).JSON(fiber.Map{"error": "Email already registered"})
+	}
+
+	// Generate OTP
+	otp := fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	otpExpiry := time.Now().Add(15 * time.Minute)
+
+	// Hash the password
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 14)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to hash password"})
+	}
+
+	// Create user with unverified status
+	user := models.Auth{
+		Email:        req.Email,
+		Password:     string(hash),
+		OTP:         otp,
+		OTPExpiresAt: otpExpiry,
+		IsVerified:   false,
+	}
+
+	_, err = authCol.InsertOne(context.TODO(), user)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to register user"})
 	}
 
-	return c.JSON(fiber.Map{"message": "User registered"})
+	// Send OTP via email using RabbitMQ
+	emailData := structure.EmailData{
+		To:      req.Email,
+		Subject: "Verify Your Email",
+		OTP:     otp,
+	}
+	
+	if producer != nil {
+		err = producer.Publish(context.Background(), emailData)
+		if err != nil {
+			// If email fails, delete the user and return error
+			authCol.DeleteOne(context.TODO(), bson.M{"email": req.Email})
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to send verification email"})
+		}
+	} else {
+		log.Println("⚠️ RabbitMQ producer not initialized, skipping email notification")
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Registration initiated. Please check your email for OTP verification.",
+		"email":   req.Email,
+	})
+}
+
+func VerifyOTP(c *fiber.Ctx) error {
+	var req structure.VerifyOTPRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+	}
+
+	// Validate request
+	if err := authValidate.Struct(req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Find user by email
+	var user models.Auth
+	err := authCol.FindOne(context.TODO(), bson.M{"email": req.Email}).Decode(&user)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Check if already verified
+	if user.IsVerified {
+		return c.Status(400).JSON(fiber.Map{"error": "Email already verified"})
+	}
+
+	// Verify OTP
+	if user.OTP != req.OTP {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid OTP"})
+	}
+
+	// Check OTP expiration
+	if time.Now().After(user.OTPExpiresAt) {
+		return c.Status(400).JSON(fiber.Map{"error": "OTP has expired"})
+	}
+
+	// Update user as verified
+	update := bson.M{
+		"$set": bson.M{
+			"isVerified": true,
+			"otp":        "",
+			"otpExpiresAt": time.Time{},
+		},
+	}
+
+	_, err = authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, update)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to verify user"})
+	}
+
+	return c.JSON(fiber.Map{"message": "Email verified successfully"})
 }
 
 func Login(c *fiber.Ctx) error {
@@ -49,9 +171,14 @@ func Login(c *fiber.Ctx) error {
 	}
 
 	var user models.Auth
-	err := authCol.FindOne(context.TODO(), bson.M{"username": data.Username}).Decode(&user)
+	err := authCol.FindOne(context.TODO(), bson.M{"email": data.Email}).Decode(&user)
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Check if user is verified
+	if !user.IsVerified {
+		return c.Status(401).JSON(fiber.Map{"error": "Email not verified"})
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(data.Password))
@@ -59,23 +186,22 @@ func Login(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
 	}
 
-	token, _ := utils.GenerateJWT(user.Username)
+	token, _ := utils.GenerateJWT(user.Email)
 	return c.JSON(fiber.Map{"token": token})
 }
 
 func UpdatePassword(c *fiber.Ctx) error {
 	type Request struct {
-		Username        string `json:"username" validate:"required"`
+		Email           string `json:"email" validate:"required,email"`
 		CurrentPassword string `json:"currentPassword" validate:"required"`
-		NewPassword     string `json:"newPassword" validate:"required"`
+		NewPassword     string `json:"newPassword" validate:"required,min=8"`
 	}
-	var validate = validator.New()
 
 	var req Request
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 	}
-	if err := validate.Struct(req); err != nil {
+	if err := authValidate.Struct(req); err != nil {
 		var ve validator.ValidationErrors
 		if errors.As(err, &ve) {
 			errorMessages := make(map[string]string)
@@ -84,15 +210,18 @@ func UpdatePassword(c *fiber.Ctx) error {
 			}
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"validationErrors": errorMessages})
 		}
-
-		// fallback in case it's not a ValidationError
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	var user models.Auth
-	err := authCol.FindOne(context.TODO(), bson.M{"username": req.Username}).Decode(&user)
+	err := authCol.FindOne(context.TODO(), bson.M{"email": req.Email}).Decode(&user)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Check if user is verified
+	if !user.IsVerified {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Email not verified"})
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword))
@@ -108,7 +237,7 @@ func UpdatePassword(c *fiber.Ctx) error {
 
 	// Update password in DB
 	update := bson.M{"$set": bson.M{"password": string(hashedPassword)}}
-	_, err = authCol.UpdateOne(context.TODO(), bson.M{"username": req.Username}, update)
+	_, err = authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, update)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update password"})
 	}
@@ -122,7 +251,7 @@ func ForgotPassword(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 	}
 
-	if err := validate.Struct(req); err != nil {
+	if err := authValidate.Struct(req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Validation failed"})
 	}
 
