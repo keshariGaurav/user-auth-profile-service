@@ -2,30 +2,35 @@ package main
 
 import (
 	"log"
-	"os"
 
 	"user-auth-profile-service/src/configs"
+	"user-auth-profile-service/src/rabbitmq"
 	"user-auth-profile-service/src/routes"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/joho/godotenv"
 )
-
+var (
+	rabbitConn    *rabbitmq.Connection
+	emailProducer *rabbitmq.Producer
+)
 func main() {
-	err := godotenv.Load()
+	cfg := configs.LoadEnv()
+
+	// Initialize RabbitMQ connection
+	var err error
+	rabbitConn, err = rabbitmq.NewConnection(cfg.AmqpURL)
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatal("Failed to establish RabbitMQ connection:", err)
 	}
-	if err := os.Setenv("AWS_ACCESS_KEY_ID", os.Getenv("AWS_ACCESS_KEY_ID")); err != nil {
-		log.Fatalf("Failed to set AWS_ACCESS_KEY_ID: %v", err)
-	}
-	if err := os.Setenv("AWS_SECRET_ACCESS_KEY", os.Getenv("AWS_SECRET_ACCESS_KEY")); err != nil {
-		log.Fatalf("Failed to set AWS_SECRET_ACCESS_KEY: %v", err)
+	defer rabbitConn.Close()
+
+	// Initialize producer
+	emailProducer, err = rabbitmq.NewProducer(rabbitConn.Channel, "email_queue", true)
+	if err != nil {
+		log.Fatal("Failed to create producer:", err)
 	}
 
-	if err := os.Setenv("AWS_REGION", os.Getenv("AWS_REGION")); err != nil {
-		log.Fatalf("Failed to set AWS_REGION: %v", err)
-	}
+
 	app := fiber.New()
 	configs.ConnectDB()
 	if err := configs.SetupAllIndexes(); err != nil {
@@ -34,7 +39,7 @@ func main() {
 	routes.UserRoute(app)
 	routes.AuthRoute(app)
 
-	if err := app.Listen(":6000"); err != nil {
+	if err := app.Listen(":6400"); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
