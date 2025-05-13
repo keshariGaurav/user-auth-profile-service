@@ -8,7 +8,16 @@ import (
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"os"
 )
+// EnvMongoURI retrieves the MongoDB URI from environment variables
+func EnvMongoURI() string {
+	uri := os.Getenv("MONGO_URI")
+	if uri == "" {
+		log.Fatal("❌ MONGO_URI environment variable is not set")
+	}
+	return uri
+}
 
 func ConnectDB() *mongo.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

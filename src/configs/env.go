@@ -7,38 +7,40 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func EnvMongoURI() string {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
+type Config struct {
+	Env           string
+	AmqpURL       string
+	QueueName     string
+	// MongoDB Configuration
+	MongoURI string
 
-	return os.Getenv("MONGOURI")
+	// AWS Configuration
+	AWSBucketName string
+
+	// JWT Configuration
+	JWTSecretKey      string
+	JWTExpirationTime string
 }
 
-func EnvAWSBucketName() string {
+func LoadEnv() Config {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Println(".env file not found, continuing")
 	}
 
-	return os.Getenv("AWS_S3_BUCKET")
-}
+	return Config{
+		// MongoDB
+		MongoURI: os.Getenv("MONGOURI"),
+		// RabbitMQ
+		Env:         os.Getenv("ENV"),
+		AmqpURL:     os.Getenv("AMQP_URL"),
+		QueueName:   os.Getenv("QUEUE_NAME"),
 
-func JWTSecretKey() string {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+		// AWS
+		AWSBucketName: os.Getenv("AWS_S3_BUCKET"),
+
+		// JWT
+		JWTSecretKey:      os.Getenv("JWT_SECRET_KEY"),
+		JWTExpirationTime: os.Getenv("JWT_EXPIRATION_TIME"),
 	}
-
-	return os.Getenv("JWT_SECRET_KEY")
-}
-
-func JWTSecretTimeDuration() string {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	return os.Getenv("JWT_EXPIRATION_TIME")
 }

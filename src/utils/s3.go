@@ -21,7 +21,8 @@ func InitS3() (*s3.Client, string) {
 		log.Fatalf("Failed to load AWS config: %v", err)
 	}
 	client := s3.NewFromConfig(cfg)
-	bucketName := configs.EnvAWSBucketName()
+	config := configs.LoadEnv()
+	bucketName := config.AWSBucketName
 	return client, bucketName
 }
 

@@ -3,14 +3,19 @@ package utils
 import (
 	"errors"
 	"time"
+	"os"
 	"crypto/rand"
 	"encoding/hex"
-	"user-auth-profile-service/src/configs"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var SecretKey = []byte(configs.JWTSecretKey())
+
+func JWTSecretKey() string {
+    return os.Getenv("JWT_SECRET_KEY")
+}
+
+var SecretKey = []byte(JWTSecretKey())
 
 type JWTClaims struct {
 	Username string `json:"username"`
