@@ -91,11 +91,14 @@ func Register(c *fiber.Ctx) error {
 	}
 
 	// Send OTP via email using RabbitMQ
-	emailData := structure.EmailData{
-		To:      req.Email,
-		Subject: "Verify Your Email",
-		OTP:     otp,
-	}
+emailData := structure.EmailData{
+	To:       req.Email,
+	Subject:  "Verify Your Email",
+	Template: "email_verification",
+	Data: map[string]string{
+		"otp": otp,
+	},
+}
 	
 	if producer != nil {
 		err = producer.Publish(context.Background(), emailData)
