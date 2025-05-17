@@ -35,6 +35,13 @@ func ConnectDB() *mongo.Client {
 // Global DB client instance
 var DB *mongo.Client = ConnectDB()
 
+func init() {
+	// Setup indexes after DB connection is established
+	if err := SetupAllIndexes(); err != nil {
+		log.Fatalf("Failed to setup indexes: %v", err)
+	}
+}
+
 // GetCollection returns a MongoDB collection by name
 func GetCollection(client *mongo.Client, collectionName string) *mongo.Collection {
 	return client.Database("golangAPI").Collection(collectionName)

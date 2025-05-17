@@ -12,7 +12,7 @@ type Auth struct {
 	Password     string             `bson:"password" json:"password" validate:"required,min=8"`
 	IsVerified   bool               `bson:"isVerified" json:"isVerified"`
 	OTP          string             `bson:"otp,omitempty" json:"otp,omitempty"`
-	OTPExpiresAt time.Time          `bson:"otpExpiresAt,omitempty" json:"otpExpiresAt,omitempty"`
+	OTPExpiresAt time.Time          `bson:"otpExpiresAt" json:"otpExpiresAt"`
 	Token        string             `bson:"token,omitempty" json:"token,omitempty"`
-	ExpiresAt    time.Time          `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
+	ExpiresAt    time.Time          `bson:"expiresAt" json:"expiresAt"`
 }

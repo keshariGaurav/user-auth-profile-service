@@ -1,4 +1,4 @@
 package structure
 type ForgotPasswordRequest struct {
-	Username string `json:"username" validate:"required"`
+	Email string `json:"email" validate:"required"`
 }

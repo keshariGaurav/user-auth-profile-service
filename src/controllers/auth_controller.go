@@ -260,11 +260,10 @@ func ForgotPassword(c *fiber.Ctx) error {
 
 	// Check if user exists
 	var user models.User
-	err := userCollection.FindOne(context.TODO(), bson.M{"username": req.Username}).Decode(&user)
+	err := userCollection.FindOne(context.TODO(), bson.M{"username": req.Email}).Decode(&user)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
 	}
-	fmt.Print(user)
 
 	// Generate token
 	token := utils.GenerateResetToken()
@@ -272,7 +271,7 @@ func ForgotPassword(c *fiber.Ctx) error {
 
 
 	update := bson.M{"$set": bson.M{"token": string(token), "expiresAt": ExpiresAt}}
-	_, err = authCol.UpdateOne(context.TODO(), bson.M{"username": req.Username}, update)
+	_, err = authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, update)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save token"})
 	}
