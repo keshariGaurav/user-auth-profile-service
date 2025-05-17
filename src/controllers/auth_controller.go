@@ -10,6 +10,7 @@ import (
 	"user-auth-profile-service/src/configs"
 	"user-auth-profile-service/src/models"
 	"user-auth-profile-service/src/rabbitmq"
+	"user-auth-profile-service/src/responses"
 	"user-auth-profile-service/src/structure"
 	"user-auth-profile-service/src/utils"
 
@@ -60,18 +61,24 @@ func init() {
 func Register(c *fiber.Ctx) error {
 	var req structure.RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		return utils.RespondWithError(c, fiber.StatusBadRequest, utils.ErrCodeBadRequest, "Invalid request format", err)
 	}
 
 	// Validate request
 	if err := authValidate.Struct(req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		validationErrors := make(map[string]string)
+		if ve, ok := err.(validator.ValidationErrors); ok {
+			for _, e := range ve {
+				validationErrors[e.Field()] = fmt.Sprintf("validation failed on '%s' tag", e.Tag())
+			}
+		}
+		return utils.RespondWithValidationError(c, validationErrors)
 	}
 
 	// Check if user already exists
 	count, _ := authCol.CountDocuments(context.TODO(), bson.M{"email": req.Email})
 	if count > 0 {
-		return c.Status(409).JSON(fiber.Map{"error": "Email already registered"})
+		return utils.RespondWithError(c, fiber.StatusConflict, utils.ErrCodeDuplicate, "Email already registered", nil)
 	}
 
 	// Generate OTP
@@ -81,7 +88,7 @@ func Register(c *fiber.Ctx) error {
 	// Hash the password
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 14)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to hash password"})
+		return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to hash password", err)
 	}
 
 	// Create user with unverified status
@@ -95,33 +102,33 @@ func Register(c *fiber.Ctx) error {
 
 	_, err = authCol.InsertOne(context.TODO(), user)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to register user"})
+		return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to register user", err)
 	}
 
 	// Send OTP via email using RabbitMQ
-emailData := structure.EmailData{
-	To:       req.Email,
-	Subject:  "Verify Your Email",
-	Template: "email_verification",
-	Data: map[string]string{
-		"otp": otp,
-	},
-}
+	emailData := structure.EmailData{
+		To:       req.Email,
+		Subject:  "Verify Your Email",
+		Template: "email_verification",
+		Data: map[string]string{
+			"otp": otp,
+		},
+	}
 	
 	if producer != nil {
 		err = producer.Publish(context.Background(), emailData)
 		if err != nil {
 			// If email fails, delete the user and return error
 			authCol.DeleteOne(context.TODO(), bson.M{"email": req.Email})
-			return c.Status(500).JSON(fiber.Map{"error": "Failed to send verification email"})
+			return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to send verification email", err)
 		}
 	} else {
 		log.Println("⚠️ RabbitMQ producer not initialized, skipping email notification")
+		return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Email service unavailable", nil)
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "Registration initiated. Please check your email for OTP verification.",
-		"email":   req.Email,
+	return responses.SendSuccessResponse(c, fiber.StatusCreated, "Registration initiated. Please check your email for OTP verification.", fiber.Map{
+		"email": req.Email,
 	})
 }
 
