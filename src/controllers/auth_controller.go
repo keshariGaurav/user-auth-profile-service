@@ -23,30 +23,38 @@ import (
 var (
 	authCol  = configs.GetCollection(configs.DB, "auth")
 	producer *rabbitmq.Producer
+	authValidate = validator.New()
+	config = configs.LoadEnv()
 )
 
-// Using a separate validate variable for auth controller
-var authValidate = validator.New()
-
 func init() {
-	config := configs.LoadEnv()
-	conn, err := amqp.Dial(config.AmqpURL)
-	if (err != nil) {
-		log.Printf("Failed to connect to RabbitMQ: %v", err)
-		return
-	}
+    maxRetries := 3
+    retryDelay := time.Second * 5
 
-	ch, err := conn.Channel()
-	if (err != nil) {
-		log.Printf("Failed to open channel: %v", err)
-		return
-	}
+    for attempt := range make([]int, maxRetries) {
+        conn, err := amqp.Dial(config.AmqpURL)
+        if err != nil {
+            log.Printf("Failed to connect to RabbitMQ (attempt %d/%d): %v", attempt+1, maxRetries, err)
+            if attempt < maxRetries-1 {
+                time.Sleep(retryDelay)
+                continue
+            }
+            log.Fatalf("Failed to connect to RabbitMQ after %d attempts: %v", maxRetries, err)
+        }
 
-	producer, err = rabbitmq.NewProducer(ch, config.QueueName, true)
-	if (err != nil) {
-		log.Printf("Failed to create producer: %v", err)
-		return
-	}
+        ch, err := conn.Channel()
+        if err != nil {
+            log.Fatalf("Failed to open channel: %v", err)
+        }
+
+        producer, err = rabbitmq.NewProducer(ch, config.QueueName, true)
+        if err != nil {
+            log.Fatalf("Failed to create producer: %v", err)
+        }
+
+        log.Println("✅ Successfully connected to RabbitMQ")
+        return
+    }
 }
 
 func Register(c *fiber.Ctx) error {
