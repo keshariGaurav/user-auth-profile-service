@@ -2,7 +2,6 @@ package configs
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -12,24 +11,40 @@ import (
 
 func ConnectDB() *mongo.Client {
 	config := LoadEnv()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	maxRetries := 3
+	retryDelay := time.Second * 5
 
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	clientOpts := options.Client().ApplyURI(config.MongoURI).SetServerAPIOptions(serverAPI)
+	for attempt := range make([]int, maxRetries) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-	client, err := mongo.Connect(ctx, clientOpts)
-	if err != nil {
-		log.Fatalf("❌ Failed to connect to MongoDB: %v", err)
+		serverAPI := options.ServerAPI(options.ServerAPIVersion1)
+		clientOpts := options.Client().ApplyURI(config.MongoURI).SetServerAPIOptions(serverAPI)
+
+		client, err := mongo.Connect(ctx, clientOpts)
+		if err != nil {
+			log.Printf("❌ Failed to connect to MongoDB (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			if attempt < maxRetries-1 {
+				time.Sleep(retryDelay)
+				continue
+			}
+			log.Fatalf("❌ Failed to connect to MongoDB after %d attempts: %v", maxRetries, err)
+		}
+
+		// Ping the database
+		if err := client.Ping(ctx, nil); err != nil {
+			log.Printf("❌ MongoDB ping failed (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			if attempt < maxRetries-1 {
+				time.Sleep(retryDelay)
+				continue
+			}
+			log.Fatalf("❌ MongoDB ping failed after %d attempts: %v", maxRetries, err)
+		}
+
+		log.Printf("✅ Connected to MongoDB successfully on attempt %d/%d", attempt+1, maxRetries)
+		return client
 	}
-
-	// Ping the database
-	if err := client.Ping(ctx, nil); err != nil {
-		log.Fatalf("❌ MongoDB ping failed: %v", err)
-	}
-
-	fmt.Println("✅ Connected to MongoDB")
-	return client
+	return nil
 }
 
 // Global DB client instance
