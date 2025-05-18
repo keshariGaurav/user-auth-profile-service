@@ -214,13 +214,7 @@ func Login(c *fiber.Ctx) error {
 }
 
 func UpdatePassword(c *fiber.Ctx) error {
-	type Request struct {
-		Email           string `json:"email" validate:"required,email"`
-		CurrentPassword string `json:"currentPassword" validate:"required"`
-		NewPassword     string `json:"newPassword" validate:"required,min=8"`
-	}
-
-	var req Request
+	var req structure.UpdatePasswordRequest
 	if err := c.BodyParser(&req); err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Invalid request format", map[string]string{"error": err.Error()})
 	}
@@ -319,13 +313,7 @@ func ResetPassword(c *fiber.Ctx) error {
 		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Reset token is required", nil)
 	}
 
-	// Define request body structure
-	type ResetRequest struct {
-		Password        string `json:"password" validate:"required,min=8"`
-		ConfirmPassword string `json:"confirmPassword" validate:"required,min=8"`
-	}
-
-	var req ResetRequest
+	var req structure.ResetRequest
 	if err := c.BodyParser(&req); err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Invalid request format", map[string]string{"error": err.Error()})
 	}
