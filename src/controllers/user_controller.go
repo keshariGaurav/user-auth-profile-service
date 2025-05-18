@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -17,8 +18,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-var userCollection *mongo.Collection = configs.GetCollection(configs.DB, "users")
-var validate = validator.New()
+var (
+	userCollection *mongo.Collection = configs.GetCollection(configs.DB, "users")
+	validate = validator.New()
+)
 
 func CreateUser(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -36,12 +39,12 @@ func CreateUser(c *fiber.Ctx) error {
 	username := c.Locals("username").(string)
 
 	if err != nil {
-		return utils.RespondWithError(c, fiber.StatusBadRequest, utils.ErrCodeBadRequest, "Resume file is required", err)
+		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Resume file is required", map[string]string{"error": err.Error()})
 	}
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to open resume file", err)
+		return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to open resume file", map[string]string{"error": err.Error()})
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
@@ -56,13 +59,13 @@ func CreateUser(c *fiber.Ctx) error {
 			{"username": username},
 		}}).Decode(&user)
 	if err == nil {
-		return utils.RespondWithError(c, http.StatusConflict, utils.ErrCodeDuplicate, "User already exists", err)
+		return responses.SendErrorResponse(c, http.StatusConflict, responses.ErrCodeDuplicate, "User already exists", nil)
 	}
 
 	s3Client, bucketName := utils.InitS3()
 	resumeURL, err := utils.UploadToS3(s3Client, bucketName, file, fileHeader.Filename)
 	if err != nil {
-		return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to upload resume to S3", err)
+		return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to upload resume to S3", map[string]string{"error": err.Error()})
 	}
 
 	newUser := models.User{
@@ -80,12 +83,18 @@ func CreateUser(c *fiber.Ctx) error {
 	}
 
 	if validationErr := validate.Struct(&newUser); validationErr != nil {
-		return utils.RespondWithError(c, http.StatusBadRequest, utils.ErrCodeValidation, "Validation failed", validationErr)
+		validationErrors := make(map[string]string)
+		if ve, ok := validationErr.(validator.ValidationErrors); ok {
+			for _, e := range ve {
+				validationErrors[e.Field()] = fmt.Sprintf("validation failed on '%s' tag", e.Tag())
+			}
+		}
+		return responses.SendValidationError(c, validationErrors)
 	}
 
 	result, err := userCollection.InsertOne(ctx, newUser)
 	if err != nil {
-		return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to save user", err)
+		return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to save user", map[string]string{"error": err.Error()})
 	}
 
 	return responses.SendSuccessResponse(c, http.StatusCreated, "User created successfully", fiber.Map{"data": result})
@@ -101,7 +110,7 @@ func GetAUser(c *fiber.Ctx) error {
 
 	err := userCollection.FindOne(ctx, bson.M{"id": objId}).Decode(&user)
 	if err != nil {
-		return utils.RespondWithError(c, http.StatusNotFound, utils.ErrCodeNotFound, "User does not exist", err)
+		return responses.SendErrorResponse(c, http.StatusNotFound, responses.ErrCodeNotFound, "User does not exist", map[string]string{"error": err.Error()})
 	}
 
 	return responses.SendSuccessResponse(c, http.StatusOK, "success", fiber.Map{"data": user})
@@ -116,15 +125,21 @@ func EditAUser(c *fiber.Ctx) error {
 
 	objId, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
-		return utils.RespondWithError(c, fiber.StatusBadRequest, utils.ErrCodeBadRequest, "Invalid user ID", err)
+		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Invalid user ID", map[string]string{"error": err.Error()})
 	}
 
 	if err := c.BodyParser(&user); err != nil {
-		return utils.RespondWithError(c, fiber.StatusBadRequest, utils.ErrCodeBadRequest, "Failed to parse body", err)
+		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Failed to parse body", map[string]string{"error": err.Error()})
 	}
 
 	if validationErr := validate.Struct(&user); validationErr != nil {
-		return utils.RespondWithError(c, fiber.StatusBadRequest, utils.ErrCodeValidation, "Validation Error", validationErr)
+		validationErrors := make(map[string]string)
+		if ve, ok := validationErr.(validator.ValidationErrors); ok {
+			for _, e := range ve {
+				validationErrors[e.Field()] = fmt.Sprintf("validation failed on '%s' tag", e.Tag())
+			}
+		}
+		return responses.SendValidationError(c, validationErrors)
 	}
 
 	var resumeURL string
@@ -132,7 +147,7 @@ func EditAUser(c *fiber.Ctx) error {
 	if err == nil && fileHeader != nil {
 		file, err := fileHeader.Open()
 		if err != nil {
-			return utils.RespondWithError(c, fiber.StatusBadRequest, utils.ErrCodeBadRequest, "Failed to open resume file", err)
+			return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Failed to open resume file", map[string]string{"error": err.Error()})
 		}
 		defer func() {
 			if err := file.Close(); err != nil {
@@ -143,7 +158,7 @@ func EditAUser(c *fiber.Ctx) error {
 		s3Client, bucketName := utils.InitS3()
 		uploadURL, err := utils.UploadToS3(s3Client, bucketName, file, fileHeader.Filename)
 		if err != nil {
-			return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to upload to S3", err)
+			return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to upload to S3", map[string]string{"error": err.Error()})
 		}
 		resumeURL = uploadURL
 	}
@@ -163,14 +178,14 @@ func EditAUser(c *fiber.Ctx) error {
 
 	result, err := userCollection.UpdateOne(ctx, bson.M{"id": objId}, bson.M{"$set": update})
 	if err != nil {
-		return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to update user", err)
+		return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to update user", map[string]string{"error": err.Error()})
 	}
 
 	var updatedUser models.User
 	if result.MatchedCount == 1 {
 		err := userCollection.FindOne(ctx, bson.M{"id": objId}).Decode(&updatedUser)
 		if err != nil {
-			return utils.RespondWithError(c, fiber.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to fetch updated user", err)
+			return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to fetch updated user", map[string]string{"error": err.Error()})
 		}
 	}
 
@@ -186,11 +201,11 @@ func DeleteAUser(c *fiber.Ctx) error {
 
 	result, err := userCollection.DeleteOne(ctx, bson.M{"id": objId})
 	if err != nil {
-		return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to delete user", err)
+		return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to delete user", map[string]string{"error": err.Error()})
 	}
 
 	if result.DeletedCount < 1 {
-		return responses.SendErrorResponse(c, http.StatusNotFound, utils.ErrCodeNotFound, "User with specified ID not found!", nil)
+		return responses.SendErrorResponse(c, http.StatusNotFound, responses.ErrCodeNotFound, "User with specified ID not found!", nil)
 	}
 
 	return responses.SendSuccessResponse(c, http.StatusOK, "User successfully deleted", nil)
@@ -202,11 +217,11 @@ func DeleteAllUsers(c *fiber.Ctx) error {
 
     result, err := userCollection.DeleteMany(ctx, bson.M{})
     if err != nil {
-        return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to delete users", err)
+        return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to delete users", map[string]string{"error": err.Error()})
     }
 
     if result.DeletedCount < 1 {
-        return responses.SendErrorResponse(c, http.StatusNotFound, utils.ErrCodeNotFound, "No users found to delete!", nil)
+        return responses.SendErrorResponse(c, http.StatusNotFound, responses.ErrCodeNotFound, "No users found to delete!", nil)
     }
 
     return responses.SendSuccessResponse(c, http.StatusOK, "All users successfully deleted", fiber.Map{"count": result.DeletedCount})
@@ -219,7 +234,7 @@ func GetAllUsers(c *fiber.Ctx) error {
 
 	results, err := userCollection.Find(ctx, bson.M{})
 	if err != nil {
-		return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Failed to fetch users", err)
+		return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to fetch users", map[string]string{"error": err.Error()})
 	}
 
 	defer func() {
@@ -231,7 +246,7 @@ func GetAllUsers(c *fiber.Ctx) error {
 	for results.Next(ctx) {
 		var singleUser models.User
 		if err = results.Decode(&singleUser); err != nil {
-			return utils.RespondWithError(c, http.StatusInternalServerError, utils.ErrCodeInternalError, "Error in fetching", err)
+			return responses.SendErrorResponse(c, http.StatusInternalServerError, responses.ErrCodeInternalError, "Error in fetching", map[string]string{"error": err.Error()})
 		}
 		users = append(users, singleUser)
 	}
