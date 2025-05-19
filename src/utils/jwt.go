@@ -59,7 +59,7 @@ func ParseJWT(tokenStr string) (jwt.MapClaims, error) {
 }
 
 func GenerateResetToken() string {
-	b := make([]byte, 32)
+	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }

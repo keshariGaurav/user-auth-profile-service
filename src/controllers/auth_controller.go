@@ -277,30 +277,60 @@ func ForgotPassword(c *fiber.Ctx) error {
 	}
 
 	// Check if user exists
-	var user models.User
-	err := userCollection.FindOne(context.TODO(), bson.M{"username": req.Email}).Decode(&user)
+	var user models.Auth
+	err := authCol.FindOne(context.TODO(), bson.M{"email": req.Email}).Decode(&user)
 	if err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusNotFound, responses.ErrCodeNotFound, "User not found", nil)
 	}
 
 	// Generate token
-	token := utils.GenerateResetToken()
+	rawToken := utils.GenerateResetToken()
+	hashedToken, err := bcrypt.GenerateFromPassword([]byte(rawToken), bcrypt.DefaultCost)
+	if err != nil {
+		return responses.SendErrorResponse(c, fiber.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to generate reset token", map[string]string{"error": err.Error()})
+	}
 	ExpiresAt := time.Now().Add(15 * time.Minute)
 
-
-	update := bson.M{"$set": bson.M{"token": string(token), "expiresAt": ExpiresAt}}
+	update := bson.M{"$set": bson.M{"resetToken": string(hashedToken), "resetTokenExpiry": ExpiresAt}}
 	_, err = authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, update)
 	if err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to save token", map[string]string{"error": err.Error()})
 	}
+	emailData := structure.EmailData{
+		To:       req.Email,
+		Subject:  "Reset Password Token",
+		Template: "reset_password",
+		Data: map[string]string{
+			"token": rawToken,
+		},
+	}
+	if producer != nil {
+		err = producer.Publish(context.Background(), emailData)
+		if err != nil {
+			// If email fails, clear the reset token fields in DB
+			resetUpdate := bson.M{
+				"$unset": bson.M{
+					"resetToken":       "",
+					"resetTokenExpiry": "",
+				},
+			}
+			authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, resetUpdate)
+			return responses.SendErrorResponse(c, fiber.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to send verification email", map[string]string{"error": err.Error()})
+		}
+	} else {
+		// If producer is not initialized, clear the reset token fields in DB
+		resetUpdate := bson.M{
+			"$unset": bson.M{
+				"resetToken":       "",
+				"resetTokenExpiry": "",
+			},
+		}
+		authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, resetUpdate)
+		log.Println("⚠️ RabbitMQ producer not initialized, skipping email notification")
+		return responses.SendErrorResponse(c, fiber.StatusInternalServerError, responses.ErrCodeInternalError, "Email service unavailable", nil)
+	}
 
-	// // Send to RabbitMQ
-	// err = SendResetPasswordEmail(req.Email, token)
-	// if err != nil {
-	// 	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to queue email"})
-	// }
-
-	return responses.SendSuccessResponse(c, fiber.StatusOK, "Reset link sent to your email", nil)
+	return responses.SendSuccessResponse(c, fiber.StatusOK, "Reset Token sent to your email", nil)
 }
 
 func ResetPassword(c *fiber.Ctx) error {
