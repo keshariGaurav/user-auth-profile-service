@@ -291,7 +291,7 @@ func ForgotPassword(c *fiber.Ctx) error {
 	}
 	ExpiresAt := time.Now().Add(15 * time.Minute)
 
-	update := bson.M{"$set": bson.M{"resetToken": string(hashedToken), "resetTokenExpiry": ExpiresAt}}
+	update := bson.M{"$set": bson.M{"token": string(hashedToken), "expiresAt": ExpiresAt}}
 	_, err = authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, update)
 	if err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to save token", map[string]string{"error": err.Error()})
@@ -310,8 +310,8 @@ func ForgotPassword(c *fiber.Ctx) error {
 			// If email fails, clear the reset token fields in DB
 			resetUpdate := bson.M{
 				"$unset": bson.M{
-					"resetToken":       "",
-					"resetTokenExpiry": "",
+					"token":       "",
+					"expiresAt": "",
 				},
 			}
 			authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, resetUpdate)
@@ -321,8 +321,8 @@ func ForgotPassword(c *fiber.Ctx) error {
 		// If producer is not initialized, clear the reset token fields in DB
 		resetUpdate := bson.M{
 			"$unset": bson.M{
-				"resetToken":       "",
-				"resetTokenExpiry": "",
+				"token":       "",
+				"expiresAt": "",
 			},
 		}
 		authCol.UpdateOne(context.TODO(), bson.M{"email": req.Email}, resetUpdate)
@@ -337,12 +337,7 @@ func ResetPassword(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Get token from request parameters
-	resetToken := c.Params("token")
-	if resetToken == "" {
-		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Reset token is required", nil)
-	}
-
+	// Get email, token, password from request body
 	var req structure.ResetRequest
 	if err := c.BodyParser(&req); err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Invalid request format", map[string]string{"error": err.Error()})
@@ -352,16 +347,25 @@ func ResetPassword(c *fiber.Ctx) error {
 		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Passwords do not match", nil)
 	}
 
-	// Find user by reset token
-	var auth models.Auth // assuming you have this model
-	err := authCol.FindOne(ctx, bson.M{"resetToken": resetToken}).Decode(&auth)
+	if req.Email == "" || req.Token == "" {
+		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Email and token are required", nil)
+	}
+
+	// Find user by email
+	var user models.Auth
+	err := authCol.FindOne(ctx, bson.M{"email": req.Email}).Decode(&user)
 	if err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Invalid or expired reset token", nil)
 	}
 
-	// Check if the token is expired
-	if time.Now().After(auth.ExpiresAt) {
-		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Reset token has expired", nil)
+	// Check if reset token exists and is not expired
+	if user.Token == "" || time.Now().After(user.ExpiresAt) {
+		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Reset token is invalid or expired", nil)
+	}
+
+	// Compare the provided token with the hashed token in DB
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Token), []byte(req.Token)); err != nil {
+		return responses.SendErrorResponse(c, fiber.StatusBadRequest, responses.ErrCodeBadRequest, "Reset token is invalid", nil)
 	}
 
 	// Hash the new password
@@ -374,12 +378,12 @@ func ResetPassword(c *fiber.Ctx) error {
 	update := bson.M{
 		"$set": bson.M{"password": string(hashedPassword)},
 		"$unset": bson.M{
-			"resetToken":       "",
-			"resetTokenExpiry": "",
+			"token":       "",
+			"expiresAt": "",
 		},
 	}
 
-	_, err = authCol.UpdateByID(ctx, auth.ID, update)
+	_, err = authCol.UpdateOne(ctx, bson.M{"email": req.Email}, update)
 	if err != nil {
 		return responses.SendErrorResponse(c, fiber.StatusInternalServerError, responses.ErrCodeInternalError, "Failed to update password", map[string]string{"error": err.Error()})
 	}
