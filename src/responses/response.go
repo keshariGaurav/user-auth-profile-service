@@ -51,6 +51,7 @@ func SendErrorResponse(c *fiber.Ctx, status int, code string, message string, de
 		Success:   false,
 		Timestamp: time.Now().UTC(),
 		RequestID: uuid.New().String(),
+		Message:  message,
 		Error: &ErrorInfo{
 			Code:    code,
 			Message: message,
